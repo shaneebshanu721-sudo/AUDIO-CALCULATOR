@@ -23,7 +23,7 @@ export const STATES = Object.freeze({
 });
 
 export const DUPLICATE_WINDOW_MS = 1500;
-const RESTART_DELAY_MS = 300;
+const RESTART_DELAY_MS = 120; // short gap so fast dictation is not missed
 const START_TIMEOUT_MS = 7000;
 const MAX_NETWORK_RETRIES = 3;
 const MAX_EMPTY_RESTARTS = 8;

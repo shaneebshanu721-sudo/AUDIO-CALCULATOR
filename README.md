@@ -2,8 +2,9 @@
 
 A mobile-first web app for internal auditors who total physical receipt books, vouchers and cash receipts. Tap **Start Listening** once, speak each voucher amount with a short pause between them, and the app adds every amount to the current receipt book — no typing, no saying “plus”.
 
-- Separate workspace per receipt book (name/number, audit date), plus a consolidated grand total
-- Every entry keeps its amount, voucher/leaf reference, time, source (voice/manual), the exact speech transcript and remarks
+- **Version 2:** navy & white design · adding-machine **tape** with leaf numbers and running total · automatic leaf numbering (1, 2, 3… from a starting leaf you choose; say “leaf 25” to jump) · big **Undo** that reverses any add/edit/delete · **read-back** of each amount and the total · fast dictation (“588 … 1400 … 600”) · better mixed Malayalam/English recognition
+- Separate workspace per Receipt / Voucher / Cash book (number, audit date, first leaf), plus a consolidated grand total
+- Every entry keeps its leaf number, amount, optional voucher reference, time, source (voice/manual), the exact speech transcript and remarks
 - Edit, delete, undo and clear — totals are always recomputed from the stored entries
 - Uncertain voice results go to a **Needs your confirmation** list and are never added silently
 - Manual entry always available (numeric keypad)
@@ -29,7 +30,7 @@ All app files are in the top folder of this project, with no sub-folders needed:
 
 ```
 index.html  styles.css  app.js  money.js  parser.js  ledger.js  exporter.js
-storage.js  speech.js  sw.js  manifest.webmanifest  icon.svg  icon-192.png
+storage.js  speech.js  readback.js  history.js  sw.js  manifest.webmanifest  icon.svg  icon-192.png
 icon-512.png  icon-512-maskable.png  .nojekyll  netlify.toml
 ```
 
@@ -80,12 +81,14 @@ Full guide: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 
 ## 4. Daily workflow
 
-1. Pick the receipt book in the top bar (or **+ Book** to create one with name and audit date).
-2. Tap **Start Listening** once.
-3. Say an amount → pause → next amount → pause … Each clean amount is added automatically and shown large in green with the new total.
-4. Anything uncertain (Malayalam number words, unrecognised words, two amounts in one breath, recognition unsure between “fifteen” and “fifty”, a possible duplicate) appears in **Needs your confirmation** with buttons to add, choose, correct or discard.
-5. Say **“undo”** (or tap *Undo last entry*) to remove the last entry. Tap ✎ or 🗑 on any entry to fix it; totals update instantly.
-6. Tap **Stop Listening** when done. The app also stops on its own after 3 minutes of silence or when you switch apps.
+1. Pick the book in the top bar, or **+ Book** → type (Receipt / Voucher / Cash), book number, **first leaf no.**, audit date.
+2. Tap **Start** once.
+3. Say an amount → pause → next amount … Each amount is added to the next leaf, shown on the tape with the running total, and read back (“588, total 10,588”). Turn read-back off with the 🔊 chip.
+4. Leaves: numbered automatically. Say **“leaf 25”** (or tap *Next: Leaf …*) to jump; numbering continues 26, 27… You can also say “leaf 7, five hundred eighty eight”, or type a leaf in *Type an amount*.
+5. Several plain amounts said quickly (“588 1400 600”) are each added on their own leaf.
+6. Anything uncertain (unrecognised words, “fifteen” vs “fifty”, two amounts run together in words, a possible duplicate) goes to **Check these** and is not added until you tap it.
+7. **Undo** (button or say “undo”) reverses the last action — add, fast multi-add, edit, delete, clear, new book — step by step. Tap any tape line to edit or delete it.
+8. Tap **Stop** when done. The app also stops after 3 minutes of silence or when you switch apps.
 7. At the end: **Export → All books (CSV)** and **Download backup (JSON)**.
 
 Speaking tips: say whole amounts (“one lakh twenty five thousand”, “1.25 lakh”); to record a voucher number say it in digits first: “voucher 25 … ten thousand”. “Point” and “paise” work: “five hundred rupees fifty paise”.
@@ -103,7 +106,7 @@ Short version (details in [docs/SPEECH-RECOGNITION.md](docs/SPEECH-RECOGNITION.m
 | In-app browsers (WhatsApp, Gmail), Firefox, some Samsung Internet versions | Speech API usually missing → manual entry only. |
 | Offline | Voice input stops with “internet connection required”; manual entry works; data is safe. |
 | “Truly continuous” listening on Android | Not offered by Android Chrome. The app restarts listening automatically after each phrase/silence; you may hear Android’s short start chime each time. |
-| Manglish (Malayalam + English) | English (India) handles English number words best. Malayalam number words are parsed best-effort and **always** need your confirmation. |
+| Manglish (Malayalam + English) | Use the **മലയാളം** button first: Chrome then writes Malayalam numbers in Malayalam script and English numbers as Malayalam-script transliterations (ടെൻ തൗസൻഡ്), both understood. If amounts come out wrong, tap **English**. A setting can make Malayalam-word amounts ask before adding. |
 
 ---
 
@@ -123,6 +126,7 @@ Short version (details in [docs/SPEECH-RECOGNITION.md](docs/SPEECH-RECOGNITION.m
 - **Netlify:** your site → **Deploys** → drag the updated folder onto the deploy area.
 - On the phone, reload the page (pull down to refresh). The offline cache is network-first, so the newest version loads whenever you are online. Your stored entries are unaffected by updates.
 - If you change the speech or parser logic, bump `APP_VERSION` in `app.js` and the `CACHE` name in `sw.js`.
+- Data saved by version 1 is upgraded automatically (existing entries get leaves 1, 2, 3… in order).
 
 ---
 
@@ -134,7 +138,7 @@ Requires Node.js 18+ (no packages to install):
 npm test
 ```
 
-51 tests cover the amount parser (English words, digits, Indian grouping, lakh/crore, decimals/paise, voucher references, Manglish and Malayalam script, never merging two amounts), money formatting and integer-paise sums, receipt-book logic (the ₹52,200 sample, edit to ₹20,250, delete ₹600, independent second book, undo/clear), CSV export (escaping, formula-injection protection, totals), JSON backup validation, storage recovery, and the speech state machine (auto-restart, duplicate events, interim results, permission denied, network failure, restart-loop protection, idle stop), plus an end-to-end smoke test that boots the real UI code against a minimal DOM stand-in and runs the whole auditor workflow. See [docs/TEST-REPORT.md](docs/TEST-REPORT.md) for results and the on-device checklist.
+65 tests cover the amount parser (English words, digits, Indian grouping, lakh/crore, decimals/paise, voucher references, Manglish and Malayalam script, never merging two amounts), money formatting and integer-paise sums, receipt-book logic (the ₹52,200 sample, edit to ₹20,250, delete ₹600, independent second book, undo/clear), CSV export (escaping, formula-injection protection, totals), JSON backup validation, storage recovery, and the speech state machine (auto-restart, duplicate events, interim results, permission denied, network failure, restart-loop protection, idle stop), plus an end-to-end smoke test that boots the real UI code against a minimal DOM stand-in and runs the whole auditor workflow. See [docs/TEST-REPORT.md](docs/TEST-REPORT.md) for results and the on-device checklist.
 
 To try it on a computer: `npm run serve` (or `python3 -m http.server 8080`) and open <http://localhost:8080> in Chrome — `localhost` counts as secure, so the mic works there. Opening `http://192.168.x.x:8080` from your phone will **not** allow the mic (not https).
 
@@ -151,6 +155,8 @@ To try it on a computer: `npm run serve` (or `python3 -m http.server 8080`) and 
 | `money.js` | Integer-paise arithmetic, Indian formatting, manual input parsing |
 | `ledger.js` | Receipt books, entries, pending confirmations, totals |
 | `storage.js` | Local persistence and recovery |
+| `readback.js` | Speaks amounts/totals in Indian English; echo guard |
+| `history.js` | Multi-step Undo |
 | `exporter.js` | CSV export, JSON backup and validation |
 | `sw.js`, `manifest.webmanifest`, `icon*` | Installable app + offline shell |
 | `tests/` | Automated tests (`node --test`) |

@@ -2,9 +2,12 @@
 //
 // Design rules (financial safety first):
 //  * Only a clean, single, unambiguous amount gets status "ok" (auto-add).
-//  * Anything uncertain — Malayalam number words, unrecognised words, several
-//    amounts in one phrase, odd grouping, very large values — is returned as
-//    "confirm" / "multiple" so the auditor decides. Nothing uncertain is added silently.
+//  * Anything uncertain — unrecognised words, several amounts run together,
+//    odd grouping, very large values — is returned as "confirm" / "multiple".
+//    Malayalam number words are flagged (usedMalayalam) so the app can apply the
+//    user's "confirm Malayalam amounts" setting.
+//  * Several plain digit amounts in one phrase ("588 1400 600", how Chrome writes
+//    fast speech) are marked cleanSplit so the app may add them one by one.
 //  * Two amounts are never merged into one unless the words clearly form one
 //    number ("twenty thousand two hundred" = 20,200; "10000 20000" = two amounts).
 //  * Maths uses BigInt rationals; results are integer paise.
@@ -31,8 +34,8 @@ const EN_VALUES = {
   fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90,
 };
 const EN_SCALES = {
-  thousand: 1000n,
-  lakh: 100000n, lakhs: 100000n, lac: 100000n, lacs: 100000n, lak: 100000n, laks: 100000n, laakh: 100000n,
+  thousand: 1000n, thousands: 1000n, tousand: 1000n, thousend: 1000n, thausand: 1000n, thousan: 1000n, tausand: 1000n, thousant: 1000n,
+  lakh: 100000n, lakhs: 100000n, lack: 100000n, lacks: 100000n, laakhs: 100000n, lac: 100000n, lacs: 100000n, lak: 100000n, laks: 100000n, laakh: 100000n,
   million: 1000000n, millions: 1000000n,
   crore: 10000000n, crores: 10000000n, cr: 10000000n, karod: 10000000n, karor: 10000000n,
 };
@@ -46,8 +49,12 @@ const POINT_WORDS = new Set(['point', 'dot']);
 const PAISE_WORDS = new Set(['paise', 'paisa', 'paisas', 'pice', 'പൈസ']);
 const REF_WORDS = new Set([
   'voucher', 'vouchers', 'receipt', 'leaf', 'bill', 'serial', 'ref', 'reference',
-  'number', 'no', 'num', 'vr', 'sl', 'slip',
+  'number', 'no', 'num', 'vr', 'sl', 'slip', 'page',
 ]);
+// Words Chrome often writes instead of a number, accepted only right before
+// "hundred/thousand/lakh/crore" (e.g. "to thousand" = 2,000; "for lakh" = 4 lakh).
+const HOMOPHONES = { to: 2, too: 2, tu: 2, for: 4, fore: 4, won: 1, ate: 8, tree: 3, free: 3, sex: 6, nain: 9 };
+const HUNDRED_WORDS = new Set(['hundred', 'hundreds', 'hundrad', 'hunderd', 'hundered', 'hundret']);
 const FRACTION_DIGIT_WORDS = { ...Object.fromEntries(Object.entries(EN_VALUES).filter(([, v]) => v < 10)), oh: 0, o: 0 };
 
 // ---------- Malayalam / Manglish vocabulary (best-effort; always confirmed) ----------
@@ -143,6 +150,17 @@ const ML_SCRIPT = table([
   [['ആയിരം', 'ആയിരത്തി', 'ആയിരത്ത്', 'നായിരം', 'ായിരം'], scale(1000)],
   [['ലക്ഷം', 'ലക്ഷത്തി', 'ലക്ഷ'], scale(100000)],
   [['കോടി'], scale(10000000)],
+  // English number words as Malayalam-script transliterations (mixed speech with ml-IN)
+  [['വൺ'], val(1)], [['ടു'], val(2)], [['ത്രീ'], val(3)], [['ഫോർ', 'ഫോറ്'], val(4)], [['ഫൈവ്'], val(5)],
+  [['സിക്സ്'], val(6)], [['സെവൻ', 'സെവെൻ'], val(7)], [['എയ്റ്റ്', 'എയിറ്റ്', 'എയ്‌റ്റ്'], val(8)], [['നൈൻ', 'നയൻ'], val(9)],
+  [['ടെൻ'], val(10)], [['ഇലവൻ'], val(11)], [['ട്വൽവ്', 'ട്വെൽവ്'], val(12)], [['തേർട്ടീൻ'], val(13)], [['ഫോർട്ടീൻ'], val(14)],
+  [['ഫിഫ്റ്റീൻ'], val(15)], [['സിക്സ്റ്റീൻ'], val(16)], [['സെവന്റീൻ'], val(17)], [['എയ്റ്റീൻ'], val(18)], [['നൈന്റീൻ'], val(19)],
+  [['ട്വന്റി', 'ട്വെന്റി'], val(20)], [['തേർട്ടി'], val(30)], [['ഫോർട്ടി'], val(40)], [['ഫിഫ്റ്റി'], val(50)],
+  [['സിക്സ്റ്റി'], val(60)], [['സെവന്റി'], val(70)], [['എയ്റ്റി', 'എയിറ്റി'], val(80)], [['നൈന്റി', 'നയന്റി'], val(90)],
+  [['ഹൺഡ്രഡ്', 'ഹണ്ട്രഡ്', 'ഹൺഡ്രെഡ്', 'ഹണ്ട്രെഡ്', 'ഹൺട്രഡ്'], HUNDRED],
+  [['തൗസൻഡ്', 'തൗസന്റ്', 'തൗസണ്ട്', 'തൗസൻറ്', 'തൌസന്റ്', 'തൗസൻ്റ്', 'തൗസന്ഡ്'], scale(1000)],
+  [['ലാഖ്', 'ലാക്ക്', 'ലാക്', 'ലാക്സ്'], scale(100000)],
+  [['ക്രോർ', 'ക്രോറ്', 'ക്രോർസ്'], scale(10000000)],
 ]);
 
 /**
@@ -210,7 +228,7 @@ function tokenizeWord(w) {
   }
   if (/^[\p{L}\d]+$/u.test(w) && /\d/.test(w) && /\p{L}/u.test(w)) return { t: 'alnum', raw: w };
   if (w in EN_VALUES) return { t: 'val', v: R(EN_VALUES[w]), src: 'word', raw: w };
-  if (w === 'hundred' || w === 'hundreds') return { t: 'hundred', raw: w };
+  if (HUNDRED_WORDS.has(w)) return { t: 'hundred', raw: w };
   if (w in EN_SCALES) return { t: 'scale', v: EN_SCALES[w], raw: w };
   if (w === 'a' || w === 'an') return { t: 'a', raw: w };
   if (w === 'oh' || w === 'o') return { t: 'oh', raw: w };
@@ -220,6 +238,7 @@ function tokenizeWord(w) {
   if (POINT_WORDS.has(w)) return { t: 'point', raw: w };
   if (PAISE_WORDS.has(w)) return { t: 'paise', raw: w };
   if (REF_WORDS.has(w)) return { t: 'refkw', raw: w };
+  if (w in HOMOPHONES) return { t: 'homo', v: HOMOPHONES[w], raw: w };
   return null;
 }
 
@@ -234,7 +253,12 @@ export function tokenize(normalized) {
     if (seg && seg.length) out.push(...seg);
     else out.push({ t: 'unknown', raw: w });
   }
-  return out;
+  // A homophone counts as a number only right before hundred/thousand/lakh/crore.
+  return out.map((t, i) => {
+    if (t.t !== 'homo') return t;
+    const nx = out[i + 1];
+    return nx && (nx.t === 'hundred' || nx.t === 'scale') ? { t: 'val', v: R(t.v), src: 'word', raw: t.raw } : { t: 'unknown', raw: t.raw };
+  });
 }
 
 // ---------- grammar ----------
@@ -253,6 +277,7 @@ function canAdd(group, v, tok, prev, lastScale) {
 /** Group a token list into one or more amounts (rationals, in rupees). */
 export function groupAmounts(tokens) {
   const amounts = [];
+  let unclear = false; // true when two amounts were split for a reason other than digits-then-digits or "plus"
   let total = R(0), group = R(0), started = false, lastScale = null, hasHundred = false, prev = null;
   const flush = () => {
     if (started) amounts.push(radd(total, group));
@@ -269,7 +294,10 @@ export function groupAmounts(tokens) {
     if (tok.t === 'val') {
       if (!started) { group = tok.v; started = true; hasHundred = false; }
       else if (canAdd(group, tok.v, tok, prev, lastScale)) group = radd(group, tok.v);
-      else { flush(); group = tok.v; started = true; }
+      else {
+        if (!(tok.src === 'digit' && prev && prev.t === 'val' && prev.src === 'digit')) unclear = true;
+        flush(); group = tok.v; started = true;
+      }
       if (tok.v.n >= 100n * tok.v.d && risInt(tok.v) && tok.src === 'word') hasHundred = true;
     } else if (tok.t === 'hundred') {
       if (!started) { group = R(100); started = true; hasHundred = true; }
@@ -283,6 +311,7 @@ export function groupAmounts(tokens) {
         total = radd(total, rmul(group, tok.v));
       } else {
         amounts.push(total); // a new amount starts with the current group
+        unclear = true;
         total = rmul(group, tok.v);
       }
       group = R(0); lastScale = tok.v; hasHundred = false;
@@ -292,7 +321,7 @@ export function groupAmounts(tokens) {
     prev = tok;
   }
   flush();
-  return { amounts };
+  return { amounts, cleanSplit: !unclear };
 }
 
 function detectCommand(norm) {
@@ -400,12 +429,16 @@ export function parseAmount(transcript) {
     const g = groupAmounts(tokens);
     if (g.error) return invalid(g.error);
     amounts = g.amounts;
+    result.cleanSplit = g.cleanSplit;
     if (paiseExtra !== null) {
       if (amounts.length > 1) return invalid('Could not understand the rupees part.');
       amounts = [radd(amounts[0] || R(0), { n: paiseExtra, d: 100n })];
     }
   }
 
+  if (amounts.length === 0 && result.reference && unknown.length === 0) {
+    return { ...result, status: 'command', command: 'setLeaf' };
+  }
   if (amounts.length === 0) {
     return invalid(unknown.length ? `No amount understood in “${unknown.join(' ')}”.` : 'No amount was heard.');
   }
@@ -419,10 +452,9 @@ export function parseAmount(transcript) {
   }
 
   if (paiseList.length > 1) {
-    return { ...result, status: 'multiple', amounts: paiseList, reasons: ['More than one amount was heard in one phrase.'] };
+    return { ...result, status: 'multiple', amounts: paiseList, cleanSplit: !!result.cleanSplit && !result.reference && unknown.length === 0, reasons: ['More than one amount was heard in one phrase.'] };
   }
   const reasons = [];
-  if (result.usedMalayalam) reasons.push('Malayalam number words — please confirm.');
   if (unknown.length) reasons.push(`Unrecognised words: “${unknown.join(' ')}”.`);
   if (paiseList[0] >= LARGE_AMOUNT_PAISE) reasons.push('Unusually large amount (₹1 crore or more).');
   return { ...result, status: reasons.length ? 'confirm' : 'ok', paise: paiseList[0], reasons };
