@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#0f4c35">
+  <meta name="description" content="Voice calculator for internal auditors: speak voucher amounts and get receipt-book totals.">
+  <title>Voice Audit Calculator</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <!-- Shown only if the JavaScript modules fail to load (e.g. page opened as a file / content:// address). -->
+  <div class="load-check" id="load-check">
+    <h1>Voice Audit Calculator did not start</h1>
+    <p>This usually means the page was opened as a local file (an address beginning with <code>content://</code> or <code>file://</code>). Android Chrome blocks scripts and the microphone for such pages.</p>
+    <p><strong>Open the app from its https:// web address instead</strong> (for example <code>https://your-name.github.io/voice-audit-calculator/</code>). See README → “Deploy”.</p>
+  </div>
+
+  <div class="app" id="app-root" hidden>
+    <header class="topbar">
+      <div class="brand" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V5a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/></svg>
+      </div>
+      <label class="sr-only" for="book-select">Receipt book</label>
+      <select id="book-select" class="book-select"></select>
+      <button type="button" id="btn-new-book" class="btn btn-ghost-light">+ Book</button>
+      <div class="topbar-total" id="topbar-total" aria-hidden="true"></div>
+    </header>
+
+    <div id="env-banner" class="banner banner-error" role="alert" hidden></div>
+    <div id="storage-banner" class="banner banner-warn" role="alert" hidden></div>
+    <div id="offline-banner" class="banner banner-warn" hidden>You are offline. Entries are safe on this phone; voice recognition needs internet. Manual entry still works.</div>
+
+    <main class="container">
+      <section class="card total-card" aria-labelledby="book-name">
+        <div class="book-head">
+          <div>
+            <h1 id="book-name" class="book-name"></h1>
+            <div id="book-date" class="muted small"></div>
+          </div>
+          <button type="button" id="btn-book-edit" class="btn btn-ghost">Rename / date</button>
+        </div>
+        <div class="total-label">Book total</div>
+        <div class="total" id="book-total" aria-live="polite"></div>
+        <div class="total-sub">
+          <span id="book-count"></span>
+          <span class="dotsep" aria-hidden="true">•</span>
+          <span>All books: <strong id="grand-total"></strong></span>
+        </div>
+        <div class="row-actions">
+          <button type="button" id="btn-undo" class="btn btn-outline">↶ Undo last entry</button>
+        </div>
+      </section>
+
+      <section class="card voice-card" aria-label="Voice input">
+        <div class="status-row" role="status" aria-live="polite">
+          <span class="status-dot" id="status-dot" data-state="off"></span>
+          <span id="status-text">Microphone is off.</span>
+        </div>
+        <button type="button" id="btn-listen" class="listen-btn" aria-pressed="false" data-state="off">
+          <svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true"><path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V5a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/></svg>
+          <span id="listen-label">Start Listening</span>
+        </button>
+        <div class="voice-controls">
+          <label class="inline-field">Language
+            <select id="lang-select">
+              <option value="en-IN">English (India)</option>
+              <option value="ml-IN">Malayalam (India)</option>
+              <option value="en-US">English (US)</option>
+            </select>
+          </label>
+          <button type="button" id="btn-retry" class="btn btn-primary" hidden>Retry</button>
+        </div>
+        <div class="live">
+          <div class="live-label">Heard</div>
+          <div id="live-text" class="live-text">—</div>
+        </div>
+        <div id="last-added" class="last-added" aria-live="assertive"></div>
+        <p class="muted small hint">Speak one amount, pause, then the next — no need to say “plus”. Say “undo” to remove the last entry.</p>
+      </section>
+
+      <section id="pending-section" class="card pending-card" hidden aria-labelledby="pending-title">
+        <h2 id="pending-title">Needs your confirmation <span class="badge badge-warn" id="pending-count"></span></h2>
+        <p class="muted small">These were heard but NOT added, because the result was uncertain.</p>
+        <ul id="pending-list" class="pending-list"></ul>
+      </section>
+
+      <section class="card" aria-labelledby="manual-title">
+        <h2 id="manual-title">Manual entry</h2>
+        <form id="manual-form" class="manual-form" novalidate>
+          <label class="sr-only" for="manual-amount">Amount in rupees</label>
+          <div class="amount-input-wrap">
+            <span class="rupee" aria-hidden="true">₹</span>
+            <input id="manual-amount" class="amount-input" inputmode="decimal" autocomplete="off" placeholder="Amount" enterkeyhint="done">
+          </div>
+          <div class="two-col">
+            <input id="manual-ref" autocomplete="off" placeholder="Voucher / leaf no. (optional)" maxlength="40" aria-label="Voucher or leaf number">
+            <input id="manual-remarks" autocomplete="off" placeholder="Remarks (optional)" maxlength="300" aria-label="Remarks">
+          </div>
+          <button type="submit" class="btn btn-primary btn-block">Add amount</button>
+          <p id="manual-error" class="field-error" role="alert"></p>
+        </form>
+      </section>
+
+      <section class="card" aria-labelledby="entries-title">
+        <div class="section-head">
+          <h2 id="entries-title">Entries</h2>
+          <button type="button" id="btn-clear-book" class="btn btn-ghost danger-text">Clear book</button>
+        </div>
+        <ol id="entry-list" class="entry-list"></ol>
+        <p id="empty-hint" class="muted empty-hint">No entries yet. Tap <strong>Start Listening</strong> and say the first amount.</p>
+        <div class="history-total"><span>Total</span><strong id="history-total"></strong></div>
+      </section>
+
+      <section class="card" aria-labelledby="books-title">
+        <h2 id="books-title">All receipt books</h2>
+        <div class="table-wrap">
+          <table class="books-table">
+            <thead><tr><th scope="col">Book</th><th scope="col" class="num">Entries</th><th scope="col" class="num">Total</th></tr></thead>
+            <tbody id="books-body"></tbody>
+            <tfoot><tr><th scope="row">Grand total</th><td class="num" id="books-count-all"></td><td class="num" id="books-grand"></td></tr></tfoot>
+          </table>
+        </div>
+      </section>
+
+      <details class="card settings">
+        <summary>Export, backup &amp; settings</summary>
+        <h3>Export</h3>
+        <div class="btn-grid">
+          <button type="button" id="btn-export-book" class="btn btn-outline">This book (CSV)</button>
+          <button type="button" id="btn-export-all" class="btn btn-outline">All books (CSV)</button>
+        </div>
+        <h3>Backup</h3>
+        <div class="btn-grid">
+          <button type="button" id="btn-backup" class="btn btn-outline">Download backup (JSON)</button>
+          <button type="button" id="btn-restore" class="btn btn-outline">Restore backup…</button>
+          <input type="file" id="restore-file" accept=".json,application/json" hidden>
+        </div>
+        <p class="muted small">Data is stored only in this browser on this phone. Browser storage is <strong>not</strong> a substitute for a secure, backed-up accounting system — export CSV and download a backup at the end of each session.</p>
+        <h3>Voice settings</h3>
+        <label class="field">Recognition mode
+          <select id="mode-select">
+            <option value="phrase">Phrase by phrase, auto-restart (recommended, Android)</option>
+            <option value="continuous">Continuous session (desktop Chrome)</option>
+          </select>
+        </label>
+        <label class="field">Theme
+          <select id="theme-select">
+            <option value="system">Follow phone setting</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </label>
+        <h3>Privacy</h3>
+        <p class="muted small">No analytics, ads or trackers. Your entries never leave this phone unless you export them. However, Chrome’s speech recognition usually sends the <em>audio</em> of what you say to Google’s speech service to convert it into text; only the resulting text is used by this app.</p>
+        <button type="button" id="btn-wipe" class="btn btn-danger btn-block">Delete all data on this phone</button>
+      </details>
+
+      <details class="card diagnostics">
+        <summary>Microphone diagnostics</summary>
+        <dl id="diag" class="diag"></dl>
+        <button type="button" id="btn-diag-refresh" class="btn btn-ghost">Refresh</button>
+      </details>
+
+      <p class="footer muted small">Voice Audit Calculator · works offline for manual entry · <span id="app-version"></span></p>
+    </main>
+  </div>
+
+  <dialog id="entry-dialog" class="dialog">
+    <form method="dialog" id="entry-form" novalidate>
+      <h2 id="entry-dialog-title">Edit entry</h2>
+      <label class="field">Amount (₹)
+        <input id="edit-amount" inputmode="decimal" autocomplete="off" required>
+      </label>
+      <label class="field">Voucher / leaf no.
+        <input id="edit-ref" autocomplete="off" maxlength="40">
+      </label>
+      <label class="field">Remarks
+        <input id="edit-remarks" autocomplete="off" maxlength="300">
+      </label>
+      <div id="edit-meta" class="muted small edit-meta"></div>
+      <p id="edit-error" class="field-error" role="alert"></p>
+      <div class="dialog-actions">
+        <button type="button" id="edit-delete" class="btn btn-danger">Delete</button>
+        <span class="spacer"></span>
+        <button type="button" id="edit-cancel" class="btn btn-ghost">Cancel</button>
+        <button type="submit" id="edit-save" class="btn btn-primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="book-dialog" class="dialog">
+    <form method="dialog" id="book-form" novalidate>
+      <h2 id="book-dialog-title">Receipt book</h2>
+      <label class="field">Book name / number
+        <input id="book-name-input" autocomplete="off" maxlength="80" required>
+      </label>
+      <label class="field">Date of audit (optional)
+        <input id="book-date-input" type="date">
+      </label>
+      <p id="book-error" class="field-error" role="alert"></p>
+      <div class="dialog-actions">
+        <button type="button" id="book-delete" class="btn btn-danger">Delete book</button>
+        <span class="spacer"></span>
+        <button type="button" id="book-cancel" class="btn btn-ghost">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
