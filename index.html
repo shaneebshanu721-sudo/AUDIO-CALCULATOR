@@ -84,6 +84,19 @@
         <div id="last-added" class="last-added" aria-live="assertive"></div>
       </section>
 
+      <!-- Keyboard voice typing: no beeps, see amounts before adding -->
+      <section class="card dictate-card" aria-labelledby="dictate-title">
+        <h2 id="dictate-title">Voice typing <span class="badge badge-voice">no beeps</span></h2>
+        <p class="muted small">Tap the box, then tap the <strong>🎤 on your keyboard</strong> (Gboard). Speak amounts with a short pause between them. Check the list, then tap Add.</p>
+        <textarea id="dictate-input" class="dictate-input" rows="3" placeholder="e.g. 4200 5300 600" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Amounts by keyboard voice typing"></textarea>
+        <ol id="dictate-preview" class="dictate-preview"></ol>
+        <p id="dictate-note" class="dictate-note small" role="status"></p>
+        <div class="btn-grid">
+          <button type="button" id="dictate-add" class="btn btn-primary" disabled>Add</button>
+          <button type="button" id="dictate-clear" class="btn btn-outline">Clear box</button>
+        </div>
+      </section>
+
       <!-- Pending -->
       <section id="pending-section" class="card pending-card" hidden aria-labelledby="pending-title">
         <h2 id="pending-title">Check these <span class="badge badge-warn" id="pending-count"></span></h2>
@@ -165,6 +178,9 @@
         <p class="muted small">Data is stored only in this browser on this phone. It is <strong>not</strong> a substitute for a secure, backed-up accounting system — export a CSV and download a backup after each session.</p>
 
         <h3>Voice</h3>
+        <label class="field">Ask me to check any single amount above (₹)
+          <input id="max-amount" inputmode="numeric" autocomplete="off" maxlength="12">
+        </label>
         <label class="field">Read back after each entry
           <select id="readback-select">
             <option value="both">Amount and total</option>

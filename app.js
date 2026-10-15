@@ -2,7 +2,7 @@
 // textContent (never innerHTML) so transcripts/remarks/imports cannot inject markup.
 
 import { formatINR, parseMoneyInput, paiseToInput } from './money.js';
-import { parseAmount } from './parser.js';
+import { parseAmount, splitSuggestions } from './parser.js';
 import * as L from './ledger.js';
 import { booksToCSV, allBooksCSV, makeBackup, parseBackup, fileSafe, MAX_BACKUP_BYTES } from './exporter.js';
 import { loadState, saveState, wipeAll, requestPersistentStorage } from './storage.js';
@@ -10,7 +10,7 @@ import { SpeechController, getRecognitionCtor, STATES, MESSAGES } from './speech
 import { ReadBack, readBackText } from './readback.js';
 import { UndoHistory } from './history.js';
 
-export const APP_VERSION = '3.0.0';
+export const APP_VERSION = '3.1.0';
 const LOW_CONFIDENCE = 0.5;
 
 const $ = (id) => document.getElementById(id);
@@ -246,12 +246,29 @@ function handleFinal(r) {
   if (parsed.usedMalayalam && state.settings.confirmMalayalam) reasons.push('Malayalam number words (confirmation is on in settings).');
   if (r.possibleDuplicate) reasons.push('Same phrase heard twice quickly — possible duplicate.');
 
+  // Large-amount guard: fast speech can run two amounts into one big number.
+  const limit = state.settings.maxAmount;
+  let splits = [];
+  const big = amounts.filter((a) => a > limit);
+  if (limit && big.length) {
+    reasons.unshift(`${big.map((a) => formatINR(a)).join(', ')} is above your check limit of ${formatINR(limit)}.`);
+    if (amounts.length === 1) {
+      // Prefer an alternative transcript that is within the limit.
+      for (const alt of r.alternatives.slice(1)) {
+        const p = parseAmount(alt.transcript);
+        if (p.status === 'ok' && p.paise <= limit && !amounts.includes(p.paise)) amounts = [...amounts, p.paise];
+      }
+      splits = splitSuggestions(amounts[0], limit);
+      if (splits.length) reasons.push('It may be two amounts said together.');
+    }
+  }
+
   const fastOk = parsed.status === 'multiple' && parsed.cleanSplit && state.settings.fastMulti;
   if ((parsed.status === 'ok' || fastOk) && reasons.length === (fastOk ? 1 : 0)) {
     addVoiceEntries(book, amounts, parsed.transcript || r.transcript, parsed.reference);
     return;
   }
-  mutate('uncertain result', () => L.addPending(state, { bookId: book.id, kind, transcript: r.transcript, amounts, combined: parsed.combined || null, reference: leafAndRef(parsed.reference).ref, leaf: leafAndRef(parsed.reference).leaf, reasons }));
+  mutate('uncertain result', () => L.addPending(state, { bookId: book.id, kind, transcript: r.transcript, amounts, splits, combined: parsed.combined || null, reference: leafAndRef(parsed.reference).ref, leaf: leafAndRef(parsed.reference).leaf, reasons }));
   showFlash('warn', 'Check this one', reasons[0] || '');
   vibrate([30, 80, 30]);
 }
@@ -337,6 +354,7 @@ function render() {
   $('books-grand').textContent = formatINR(grand);
 
   renderSettings();
+  renderDictation();
 }
 
 function renderSettings() {
@@ -346,6 +364,7 @@ function renderSettings() {
   $('theme-select').value = s.theme;
   $('readback-select').value = s.readBack;
   $('fast-multi').checked = !!s.fastMulti;
+  if (document.activeElement !== $('max-amount')) $('max-amount').value = s.maxAmount ? paiseToInput(s.maxAmount) : '';
   $('confirm-ml').checked = !!s.confirmMalayalam;
   for (const b of document.querySelectorAll('[data-lang]')) b.setAttribute('aria-pressed', String(b.dataset.lang === s.lang));
   for (const b of document.querySelectorAll('[data-view]')) b.setAttribute('aria-pressed', String(b.dataset.view === s.view));
@@ -405,6 +424,63 @@ function renderDetail(book, e) {
       el('button', { type: 'button', class: 'icon-btn', 'aria-label': `Edit leaf ${e.leaf}`, onclick: () => openEntryDialog({ mode: 'edit', bookId: book.id, entryId: e.id }) }, icon(ICON_EDIT)),
       el('button', { type: 'button', class: 'icon-btn del', 'aria-label': `Delete leaf ${e.leaf}`, onclick: () => confirmDeleteEntry(book.id, e.id) }, icon(ICON_DEL))));
 }
+
+// ---------------- keyboard voice typing box ----------------
+/** Parse the box: each line separately; returns { items:[{paise, warn}], notes:[], ok } */
+function parseDictation(text) {
+  const items = [];
+  const notes = [];
+  let ok = true;
+  const limit = state.settings.maxAmount;
+  for (const line of String(text).split(/\n+/).map((x) => x.trim()).filter(Boolean)) {
+    const p = parseAmount(line);
+    if (p.status === 'command') continue;
+    if (p.status === 'invalid') { ok = false; notes.push(`Not understood: “${line}” — ${p.reasons[0] || 'please correct it'}`); continue; }
+    const list = p.status === 'multiple' ? p.amounts : [p.paise];
+    if (p.combined) notes.push(`“${line}” may be ${formatINR(p.combined)} as one amount — if so, remove the space.`);
+    if (p.status === 'confirm') notes.push(p.reasons.join(' '));
+    for (const a of list) items.push({ paise: a, warn: limit && a > limit });
+  }
+  if (items.some((i) => i.warn)) notes.push(`Amber amounts are above your check limit of ${formatINR(limit)} — two amounts may have joined. Fix the text if needed.`);
+  return { items, notes, ok: ok && items.length > 0 };
+}
+
+function renderDictation() {
+  const book = activeBook();
+  const { items, notes, ok } = parseDictation($('dictate-input').value);
+  let leaf = L.nextLeafFor(book);
+  $('dictate-preview').replaceChildren(...items.map((it) => el('li', { class: it.warn ? 'warn' : '' },
+    el('span', { class: 'lf', text: `L${leaf++}` }), formatINR(it.paise))));
+  $('dictate-note').textContent = notes.join(' ');
+  const sum = items.reduce((s, it) => s + it.paise, 0);
+  const add = $('dictate-add');
+  add.disabled = !ok;
+  add.textContent = ok ? `Add ${items.length} · ${formatINR(sum)}` : 'Add';
+}
+
+$('dictate-input').addEventListener('input', renderDictation);
+$('dictate-input').addEventListener('focus', () => {
+  if (speech.wanted) { speech.stop(); readBack.cancel(); toast('App listening stopped — now tap 🎤 on your keyboard.'); }
+});
+$('dictate-clear').addEventListener('click', () => { $('dictate-input').value = ''; renderDictation(); });
+$('dictate-add').addEventListener('click', () => {
+  const text = $('dictate-input').value;
+  const { items, ok } = parseDictation(text);
+  if (!ok) return;
+  const over = items.filter((i) => i.warn);
+  if (over.length && !window.confirm(`${over.map((i) => formatINR(i.paise)).join(', ')} ${over.length === 1 ? 'is' : 'are'} above your check limit. Add anyway?`)) return;
+  const book = activeBook();
+  const added = mutate(`${items.length} typed-by-voice amounts`, () =>
+    items.map((it) => L.addEntry(state, book.id, { paise: it.paise, source: 'voice', transcript: text.slice(0, 300) })));
+  justAddedIds = new Set(added.map((e) => e.id));
+  $('dictate-input').value = '';
+  renderDictation();
+  render();
+  const sum = added.reduce((s, e) => s + e.paise, 0);
+  const total = L.bookTotal(book);
+  showFlash('ok', `+ ${formatINR(sum)}`, `${added.length} leaves (${added[0].leaf}–${added[added.length - 1].leaf}) · Total ${formatINR(total)}`);
+  speakAdded(sum, total);
+});
 
 // ---------------- selection & bulk delete ----------------
 function toggleSelect(id) {
@@ -475,6 +551,9 @@ function renderPending() {
     const actions = [];
     if (p.combined) {
       actions.push(el('button', { type: 'button', class: 'btn btn-primary', onclick: () => acceptPending(p.id, [p.combined]) }, `Add ${formatINR(p.combined)} as one`));
+    }
+    for (const pair of p.splits || []) {
+      actions.push(el('button', { type: 'button', class: 'btn btn-outline', onclick: () => acceptPending(p.id, pair) }, `Add ${pair.map((a) => formatINR(a)).join(' + ')}`));
     }
     if (p.kind === 'multiple' && p.amounts.length > 1) {
       actions.push(el('button', { type: 'button', class: p.combined ? 'btn btn-outline' : 'btn btn-primary', onclick: () => acceptPending(p.id, p.amounts) }, `Add all ${p.amounts.length} separately`));
@@ -718,6 +797,15 @@ $('btn-quiet').addEventListener('click', () => {
 });
 $('theme-select').addEventListener('change', (ev) => { state.settings.theme = ev.target.value; applyTheme(); persist(); });
 $('readback-select').addEventListener('change', (ev) => { state.settings.readBack = ev.target.value; if (ev.target.value === 'off') readBack.cancel(); persist(); renderSettings(); });
+$('max-amount').addEventListener('change', (ev) => {
+  const v = String(ev.target.value).trim();
+  if (v === '' || v === '0') { state.settings.maxAmount = 0; persist(); toast('Large-amount check is off.'); return; }
+  const p = parseMoneyInput(v);
+  if (!p.ok) { toast(p.error); renderSettings(); return; }
+  state.settings.maxAmount = p.paise;
+  persist();
+  toast(`Amounts above ${formatINR(p.paise)} will be held for checking.`);
+});
 $('fast-multi').addEventListener('change', (ev) => { state.settings.fastMulti = ev.target.checked; persist(); });
 $('confirm-ml').addEventListener('change', (ev) => { state.settings.confirmMalayalam = ev.target.checked; persist(); });
 

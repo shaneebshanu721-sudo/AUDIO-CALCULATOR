@@ -53,7 +53,7 @@ export function createInitialState() {
 }
 
 export function defaultSettings() {
-  return { lang: 'en-IN', mode: 'continuous', theme: 'system', readBack: 'both', confirmMalayalam: false, fastMulti: true, view: 'tape', settingsRev: 3 };
+  return { lang: 'en-IN', mode: 'continuous', theme: 'system', readBack: 'both', confirmMalayalam: false, fastMulti: true, view: 'tape', settingsRev: 3, maxAmount: 1_00_000 * 100 };
 }
 
 /** "Receipt Book No. 1", "Voucher Book No. 12", or just the name for "Other". */
@@ -246,6 +246,7 @@ export function addPending(state, item) {
     kind: item.kind === 'multiple' ? 'multiple' : 'confirm',
     transcript: cleanText(item.transcript, 300),
     amounts: (item.amounts || []).filter((a) => Number.isSafeInteger(a) && a > 0 && a <= MAX_ENTRY_PAISE),
+    splits: Array.isArray(item.splits) ? item.splits.filter((x) => Array.isArray(x) && x.length === 2 && x.every((a) => Number.isSafeInteger(a) && a > 0 && a <= MAX_ENTRY_PAISE)).slice(0, 3) : [],
     combined: Number.isSafeInteger(item.combined) && item.combined > 0 && item.combined <= MAX_ENTRY_PAISE ? item.combined : null,
     reference: cleanText(item.reference || '', 40),
     leaf: (() => { try { return parseLeaf(item.leaf); } catch { return null; } })(),

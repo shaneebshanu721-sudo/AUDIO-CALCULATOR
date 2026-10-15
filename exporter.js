@@ -146,6 +146,7 @@ export function validateState(input) {
         transcript: str(p.transcript, 300, 'Transcript'),
         amounts: Array.isArray(p.amounts) ? p.amounts.filter((a) => Number.isSafeInteger(a) && a > 0 && a <= MAX_ENTRY_PAISE).slice(0, 20) : [],
         reference: str(p.reference, 40, 'Reference'),
+        splits: Array.isArray(p.splits) ? p.splits.filter((x) => Array.isArray(x) && x.length === 2 && x.every((a) => Number.isSafeInteger(a) && a > 0 && a <= MAX_ENTRY_PAISE)).slice(0, 3) : [],
         combined: Number.isSafeInteger(p.combined) && p.combined > 0 && p.combined <= MAX_ENTRY_PAISE ? p.combined : null,
         leaf: Number.isSafeInteger(p.leaf) && p.leaf >= 1 && p.leaf <= MAX_LEAF ? p.leaf : null,
         reasons: Array.isArray(p.reasons) ? p.reasons.filter((r) => typeof r === 'string').map((r) => r.slice(0, 200)).slice(0, 5) : [],
@@ -170,6 +171,7 @@ export function validateState(input) {
       fastMulti: typeof s.fastMulti === 'boolean' ? s.fastMulti : d.fastMulti,
       view: ['tape', 'details'].includes(s.view) ? s.view : d.view,
       settingsRev: 3,
+      maxAmount: Number.isSafeInteger(s.maxAmount) && s.maxAmount >= 0 && s.maxAmount <= MAX_ENTRY_PAISE ? s.maxAmount : d.maxAmount,
     },
   };
 }

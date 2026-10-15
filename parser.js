@@ -539,3 +539,24 @@ export function parseAmount(transcript) {
   if (paiseList[0] >= LARGE_AMOUNT_PAISE) reasons.push('Unusually large amount (₹1 crore or more).');
   return { ...result, status: reasons.length ? 'confirm' : 'ok', paise: paiseList[0], reasons };
 }
+
+/**
+ * When fast speech runs two amounts together ("4200" + "5300" heard as 4205300),
+ * suggest ways to split the digits back into two amounts, each within the limit.
+ * Splits where both parts are round (end in 0) are preferred. Whole rupees only.
+ * @returns {number[][]} up to `max` pairs of paise amounts
+ */
+export function splitSuggestions(paise, limitPaise, max = 3) {
+  if (!Number.isSafeInteger(paise) || paise % 100 !== 0) return [];
+  const s = String(paise / 100);
+  const out = [];
+  for (let i = 2; i <= s.length - 2; i++) {
+    const a = s.slice(0, i), b = s.slice(i);
+    if (b[0] === '0') continue;
+    const pa = Number(a) * 100, pb = Number(b) * 100;
+    if (pa > limitPaise || pb > limitPaise) continue;
+    const score = (a.endsWith('00') ? 2 : a.endsWith('0') ? 1 : 0) + (b.endsWith('00') ? 2 : b.endsWith('0') ? 1 : 0);
+    out.push({ pair: [pa, pb], score });
+  }
+  return out.filter((x) => x.score > 0).sort((x, y) => y.score - x.score).slice(0, max).map((x) => x.pair);
+}

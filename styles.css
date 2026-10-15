@@ -318,3 +318,21 @@ details > summary { cursor: pointer; font-weight: 800; min-height: 32px; display
 .tape.selecting li.selected .leaf::before, .tape.selecting li.selected .dleaf::before { content: '☑ '; color: var(--accent); }
 .tape.selecting li.selected { background: var(--accent-soft); }
 .tape.selecting .acts { display: none; }
+
+/* Keyboard voice typing */
+.dictate-input {
+  width: 100%; min-height: 84px; font: inherit; font-size: 1.3rem; font-weight: 700; font-variant-numeric: tabular-nums;
+  color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; resize: vertical;
+}
+.dictate-input:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.dictate-preview { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.dictate-preview:empty { display: none; }
+.dictate-preview li {
+  padding: 6px 10px; border-radius: 10px; background: var(--ok-bg); color: var(--ok-ink); font-weight: 800;
+  font-variant-numeric: tabular-nums; font-size: .95rem;
+}
+.dictate-preview li .lf { font-weight: 600; opacity: .7; margin-right: 4px; font-size: .8rem; }
+.dictate-preview li.warn { background: var(--warn-bg); color: var(--warn-ink); }
+.dictate-preview li.bad { background: var(--error-bg); color: var(--error-ink); }
+.dictate-note { margin: 8px 0 10px; color: var(--warn-ink); font-weight: 700; }
+.dictate-note:empty { display: none; }
