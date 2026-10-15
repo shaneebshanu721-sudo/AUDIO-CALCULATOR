@@ -12,7 +12,9 @@
 //    number ("twenty thousand two hundred" = 20,200; "10000 20000" = two amounts).
 //  * Maths uses BigInt rationals; results are integer paise.
 
-import { isValidGrouping, MAX_ENTRY_PAISE } from './money.js';
+import { isValidGrouping, MAX_ENTRY_PAISE, formatINR } from './money.js';
+
+const formatRupees = (p) => formatINR(p, { decimals: p % 100 !== 0 });
 
 /** Amounts at or above this (₹1 crore) are queued for confirmation. */
 export const LARGE_AMOUNT_PAISE = 1_00_00_000 * 100;
@@ -147,7 +149,7 @@ const ML_SCRIPT = table([
   [['എഴുനൂറ്', 'എഴുനൂറ്റി'], val(700)],
   [['എണ്ണൂറ്', 'എണ്ണൂറ്റി'], val(800)],
   [['തൊള്ളായിരം', 'തൊള്ളായിരത്തി'], val(900)],
-  [['ആയിരം', 'ആയിരത്തി', 'ആയിരത്ത്', 'നായിരം', 'ായിരം'], scale(1000)],
+  [['ആയിരം', 'ആയിരത്തി', 'ആയിരത്ത്', 'നായിരം', 'നായിരത്തി', 'നായിരത്ത്', 'ായിരം', 'ായിരത്തി', 'ായിരത്ത്', 'യിരം', 'യിരത്തി'], scale(1000)],
   [['ലക്ഷം', 'ലക്ഷത്തി', 'ലക്ഷ'], scale(100000)],
   [['കോടി'], scale(10000000)],
   // English number words as Malayalam-script transliterations (mixed speech with ml-IN)
@@ -239,6 +241,7 @@ function tokenizeWord(w) {
   if (PAISE_WORDS.has(w)) return { t: 'paise', raw: w };
   if (REF_WORDS.has(w)) return { t: 'refkw', raw: w };
   if (w in HOMOPHONES) return { t: 'homo', v: HOMOPHONES[w], raw: w };
+  if (w === 'double' || w === 'triple') return { t: 'mult', n: w === 'double' ? 2 : 3, raw: w };
   return null;
 }
 
@@ -254,11 +257,58 @@ export function tokenize(normalized) {
     else out.push({ t: 'unknown', raw: w });
   }
   // A homophone counts as a number only right before hundred/thousand/lakh/crore.
-  return out.map((t, i) => {
+  const mapped = out.map((t, i) => {
     if (t.t !== 'homo') return t;
     const nx = out[i + 1];
     return nx && (nx.t === 'hundred' || nx.t === 'scale') ? { t: 'val', v: R(t.v), src: 'word', raw: t.raw } : { t: 'unknown', raw: t.raw };
   });
+  return mergeDictatedDigits(mapped);
+}
+
+/** One spoken digit (word "four"/"zero"/"oh" or a single digit "4"), else null. */
+function singleDigit(t) {
+  if (t.t === 'oh') return '0';
+  if (t.t !== 'val') return null;
+  if (t.src === 'digit') return !t.frac && t.digits.length === 1 ? t.digits : null;
+  return t.raw in FRACTION_DIGIT_WORDS ? String(FRACTION_DIGIT_WORDS[t.raw]) : null;
+}
+
+/**
+ * Digit-by-digit dictation: "four two zero zero", "4 2 0 0", "four two double zero"
+ * become one amount (4200). Needs 3+ digits so "five six" is not merged. Digits after
+ * "point" are left for the decimal parser; a run followed by hundred/thousand is not merged.
+ */
+function mergeDictatedDigits(tokens) {
+  const out = [];
+  let i = 0;
+  while (i < tokens.length) {
+    const startPrev = out[out.length - 1];
+    let j = i, digits = '', raws = [];
+    while (j < tokens.length) {
+      const t = tokens[j];
+      if (t.t === 'mult' && j + 1 < tokens.length && singleDigit(tokens[j + 1]) !== null) {
+        digits += singleDigit(tokens[j + 1]).repeat(t.n);
+        raws.push(t.raw, tokens[j + 1].raw);
+        j += 2;
+        continue;
+      }
+      const d = singleDigit(t);
+      if (d === null) break;
+      digits += d; raws.push(t.raw); j++;
+    }
+    const next = tokens[j];
+    const ok = digits.length >= 3 && !(startPrev && startPrev.t === 'point') && !(next && (next.t === 'hundred' || next.t === 'scale'));
+    if (ok) {
+      const clean = digits.replace(/^0+(?=\d)/, '');
+      out.push({ t: 'val', v: R(clean), src: 'digit', raw: raws.join(' '), digits: clean, frac: '', dictated: true });
+      i = j;
+    } else {
+      const t = tokens[i];
+      out.push(t.t === 'mult' ? { t: 'unknown', raw: t.raw } : t);
+      i++;
+    }
+  }
+  return out;
 }
 
 // ---------- grammar ----------
@@ -278,6 +328,7 @@ function canAdd(group, v, tok, prev, lastScale) {
 export function groupAmounts(tokens) {
   const amounts = [];
   let unclear = false; // true when two amounts were split for a reason other than digits-then-digits or "plus"
+  const boundaries = []; // how each split happened: 'sep' | 'digits' | 'other'
   let total = R(0), group = R(0), started = false, lastScale = null, hasHundred = false, prev = null;
   const flush = () => {
     if (started) amounts.push(radd(total, group));
@@ -290,12 +341,14 @@ export function groupAmounts(tokens) {
       if (nx && (nx.t === 'hundred' || nx.t === 'scale')) tok = { t: 'val', v: R(1), src: 'word', raw: tok.raw };
       else continue;
     }
-    if (tok.t === 'sep') { flush(); prev = tok; continue; }
+    if (tok.t === 'sep') { if (started) boundaries.push('sep'); flush(); prev = tok; continue; }
     if (tok.t === 'val') {
       if (!started) { group = tok.v; started = true; hasHundred = false; }
       else if (canAdd(group, tok.v, tok, prev, lastScale)) group = radd(group, tok.v);
       else {
-        if (!(tok.src === 'digit' && prev && prev.t === 'val' && prev.src === 'digit')) unclear = true;
+        const digitsSplit = tok.src === 'digit' && prev && prev.t === 'val' && prev.src === 'digit';
+        if (!digitsSplit) unclear = true;
+        boundaries.push(digitsSplit ? 'digits' : 'other');
         flush(); group = tok.v; started = true;
       }
       if (tok.v.n >= 100n * tok.v.d && risInt(tok.v) && tok.src === 'word') hasHundred = true;
@@ -312,6 +365,7 @@ export function groupAmounts(tokens) {
       } else {
         amounts.push(total); // a new amount starts with the current group
         unclear = true;
+        boundaries.push('other');
         total = rmul(group, tok.v);
       }
       group = R(0); lastScale = tok.v; hasHundred = false;
@@ -321,7 +375,7 @@ export function groupAmounts(tokens) {
     prev = tok;
   }
   flush();
-  return { amounts, cleanSplit: !unclear };
+  return { amounts, cleanSplit: !unclear, boundaries };
 }
 
 function detectCommand(norm) {
@@ -430,6 +484,7 @@ export function parseAmount(transcript) {
     if (g.error) return invalid(g.error);
     amounts = g.amounts;
     result.cleanSplit = g.cleanSplit;
+    result.boundaries = g.boundaries;
     if (paiseExtra !== null) {
       if (amounts.length > 1) return invalid('Could not understand the rupees part.');
       amounts = [radd(amounts[0] || R(0), { n: paiseExtra, d: 100n })];
@@ -452,7 +507,32 @@ export function parseAmount(transcript) {
   }
 
   if (paiseList.length > 1) {
-    return { ...result, status: 'multiple', amounts: paiseList, cleanSplit: !!result.cleanSplit && !result.reference && unknown.length === 0, reasons: ['More than one amount was heard in one phrase.'] };
+    // "4000 200" may be one amount (₹4,200) that Chrome wrote in two pieces.
+    // If a digit amount is a round number big enough to "absorb" the next one, don't split silently.
+    const b = result.boundaries || [];
+    let combined = null;
+    let joinable = false;
+    for (let k = 0; k + 1 < paiseList.length; k++) {
+      if (b[k] !== 'digits') continue;
+      const a = paiseList[k], c = paiseList[k + 1];
+      if (a % 100 || c % 100) continue;
+      const cLen = String(c / 100).length;
+      if ((a / 100) % 10 ** cLen === 0 && a > c) {
+        joinable = true; // "4000 200" -> 4,200
+        if (paiseList.length === 2) combined = a + c;
+      } else if (a < 1000) {
+        joinable = true; // "4 200" -> 4,200 (a lone single digit is rarely a receipt amount)
+        const joined = Number(String(a / 100) + String(c / 100)) * 100;
+        if (paiseList.length === 2 && Number.isSafeInteger(joined) && joined <= MAX_ENTRY_PAISE) combined = joined;
+      }
+    }
+    const reasons = ['More than one amount was heard in one phrase.'];
+    if (joinable) reasons.unshift(combined ? `Did you say ${formatRupees(combined)} as one amount?` : 'Some of these may be one amount said in parts.');
+    return {
+      ...result, status: 'multiple', amounts: paiseList, combined,
+      cleanSplit: !!result.cleanSplit && !joinable && !result.reference && unknown.length === 0,
+      reasons,
+    };
   }
   const reasons = [];
   if (unknown.length) reasons.push(`Unrecognised words: “${unknown.join(' ')}”.`);

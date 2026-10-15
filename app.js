@@ -10,7 +10,7 @@ import { SpeechController, getRecognitionCtor, STATES, MESSAGES } from './speech
 import { ReadBack, readBackText } from './readback.js';
 import { UndoHistory } from './history.js';
 
-export const APP_VERSION = '2.0.0';
+export const APP_VERSION = '3.0.0';
 const LOW_CONFIDENCE = 0.5;
 
 const $ = (id) => document.getElementById(id);
@@ -32,6 +32,8 @@ const loaded = loadState();
 let state = loaded.state;
 let storageError = loaded.warning;
 let justAddedIds = new Set();
+let selecting = false;
+const selected = new Set();
 const history = new UndoHistory(40);
 const readBack = new ReadBack();
 
@@ -249,7 +251,7 @@ function handleFinal(r) {
     addVoiceEntries(book, amounts, parsed.transcript || r.transcript, parsed.reference);
     return;
   }
-  mutate('uncertain result', () => L.addPending(state, { bookId: book.id, kind, transcript: r.transcript, amounts, reference: leafAndRef(parsed.reference).ref, leaf: leafAndRef(parsed.reference).leaf, reasons }));
+  mutate('uncertain result', () => L.addPending(state, { bookId: book.id, kind, transcript: r.transcript, amounts, combined: parsed.combined || null, reference: leafAndRef(parsed.reference).ref, leaf: leafAndRef(parsed.reference).leaf, reasons }));
   showFlash('warn', 'Check this one', reasons[0] || '');
   vibrate([30, 80, 30]);
 }
@@ -314,7 +316,9 @@ function render() {
   const card = document.querySelector('.tape-card');
   if (card) card.classList.toggle('view-details', view === 'details');
   const list = $('entry-list');
-  list.className = view === 'details' ? 'tape details' : 'tape';
+  list.className = (view === 'details' ? 'tape details' : 'tape') + (selecting ? ' selecting' : '');
+  for (const id of [...selected]) if (!book.entries.some((e) => e.id === id)) selected.delete(id);
+  renderSelectBar(book);
   list.replaceChildren(...book.entries.map((e, i) => (view === 'details' ? renderDetail(book, e) : renderTapeRow(book, e, running[i]))));
   if (justAddedIds.size) {
     const scroller = $('tape-scroll');
@@ -347,6 +351,9 @@ function renderSettings() {
   for (const b of document.querySelectorAll('[data-view]')) b.setAttribute('aria-pressed', String(b.dataset.view === s.view));
   const rb = $('btn-readback');
   rb.setAttribute('aria-pressed', String(s.readBack !== 'off'));
+  const q = $('btn-quiet');
+  q.setAttribute('aria-pressed', String(s.mode === 'continuous'));
+  q.textContent = s.mode === 'continuous' ? '🔕 Quiet mode on' : '🔔 Quiet mode off';
   rb.textContent = s.readBack === 'off' ? '🔇 Read-back off' : '🔊 Read-back on';
 }
 
@@ -355,9 +362,10 @@ function renderTapeRow(book, e, run) {
   if (e.reference) bits.push(`Ref ${e.reference}`);
   if (e.remarks) bits.push(e.remarks);
   if (e.originalPaise !== null && e.originalPaise !== undefined) bits.push(`edited, was ${formatINR(e.originalPaise)}`);
-  const open = () => openEntryDialog({ mode: 'edit', bookId: book.id, entryId: e.id });
+  const open = () => (selecting ? toggleSelect(e.id) : openEntryDialog({ mode: 'edit', bookId: book.id, entryId: e.id }));
   return el('li', {
-    class: 'row' + (justAddedIds.has(e.id) ? ' just-added' : ''), 'data-id': e.id, tabindex: '0', role: 'button',
+    class: 'row' + (justAddedIds.has(e.id) ? ' just-added' : '') + (selected.has(e.id) ? ' selected' : ''), 'data-id': e.id, tabindex: '0', role: 'button',
+    'aria-pressed': selecting ? String(selected.has(e.id)) : null,
     'aria-label': `Leaf ${e.leaf}, ${formatINR(e.paise)}. Tap to edit.`,
     onclick: open, onkeydown: (ev) => { if (ev.key === 'Enter') open(); },
   },
@@ -384,7 +392,8 @@ function renderDetail(book, e) {
   if (e.reference) meta.push(`Ref ${e.reference}`);
   if (e.remarks) meta.push(e.remarks);
   if (e.originalPaise !== null && e.originalPaise !== undefined) meta.push(`was ${formatINR(e.originalPaise)}`);
-  return el('li', { class: 'drow' + (justAddedIds.has(e.id) ? ' just-added' : ''), 'data-id': e.id },
+  return el('li', { class: 'drow' + (justAddedIds.has(e.id) ? ' just-added' : '') + (selected.has(e.id) ? ' selected' : ''), 'data-id': e.id,
+    onclick: () => { if (selecting) toggleSelect(e.id); } },
     el('div', {},
       el('div', { class: 'line1' },
         el('span', { class: 'dleaf', text: `Leaf ${e.leaf}` }),
@@ -396,6 +405,57 @@ function renderDetail(book, e) {
       el('button', { type: 'button', class: 'icon-btn', 'aria-label': `Edit leaf ${e.leaf}`, onclick: () => openEntryDialog({ mode: 'edit', bookId: book.id, entryId: e.id }) }, icon(ICON_EDIT)),
       el('button', { type: 'button', class: 'icon-btn del', 'aria-label': `Delete leaf ${e.leaf}`, onclick: () => confirmDeleteEntry(book.id, e.id) }, icon(ICON_DEL))));
 }
+
+// ---------------- selection & bulk delete ----------------
+function toggleSelect(id) {
+  if (selected.has(id)) selected.delete(id); else selected.add(id);
+  render();
+}
+function setSelecting(on) {
+  selecting = on;
+  selected.clear();
+  render();
+}
+function renderSelectBar(book) {
+  $('select-bar').hidden = !selecting;
+  $('tape-tools').hidden = selecting;
+  const n = selected.size;
+  const sum = book.entries.filter((e) => selected.has(e.id)).reduce((s, e) => s + e.paise, 0);
+  $('select-count').textContent = n ? `${n} selected · ${formatINR(sum)}` : 'Tap lines to select';
+  $('btn-delete-selected').disabled = n === 0;
+  $('btn-delete-selected').textContent = n ? `Delete ${n}` : 'Delete';
+  $('btn-select-all').textContent = n && n === book.entries.length ? 'Select none' : 'Select all';
+  $('btn-select').disabled = book.entries.length === 0;
+  $('btn-clear-book').disabled = book.entries.length === 0;
+  $('tape-hint').textContent = selecting ? 'Tap lines to select or unselect them.' : 'Tap any line to edit or delete it. Use ☑ Select to delete several lines.';
+}
+$('btn-select').addEventListener('click', () => setSelecting(true));
+$('btn-select-cancel').addEventListener('click', () => setSelecting(false));
+$('btn-select-all').addEventListener('click', () => {
+  const book = activeBook();
+  if (selected.size === book.entries.length) selected.clear();
+  else book.entries.forEach((e) => selected.add(e.id));
+  render();
+});
+$('btn-delete-selected').addEventListener('click', () => {
+  const book = activeBook();
+  const ids = [...selected];
+  if (!ids.length) return;
+  const sum = book.entries.filter((e) => selected.has(e.id)).reduce((s, e) => s + e.paise, 0);
+  if (!window.confirm(`Delete ${ids.length} ${ids.length === 1 ? 'line' : 'lines'} (${formatINR(sum)}) from ${title(book)}?`)) return;
+  mutate(`delete ${ids.length} lines`, () => L.deleteEntries(state, book.id, ids));
+  selecting = false;
+  selected.clear();
+  render();
+  toast(`Deleted ${ids.length}. Total ${formatINR(L.bookTotal(book))} — tap Undo to restore.`);
+});
+$('btn-clear-book').addEventListener('click', () => {
+  const book = activeBook();
+  if (!book.entries.length) return;
+  if (!window.confirm(`Clear ALL ${book.entries.length} lines (${formatINR(L.bookTotal(book))}) from ${title(book)}? Leaf numbering restarts from leaf ${book.startLeaf}.`)) return;
+  mutate(`clear ${title(book)}`, () => L.clearBook(state, book.id));
+  toast('Book cleared — tap Undo to bring it back.');
+});
 
 function confirmDeleteEntry(bookId, entryId) {
   const book = L.getBook(state, bookId);
@@ -413,8 +473,11 @@ function renderPending() {
   $('pending-list').replaceChildren(...items.map((p) => {
     const book = state.books.find((b) => b.id === p.bookId);
     const actions = [];
+    if (p.combined) {
+      actions.push(el('button', { type: 'button', class: 'btn btn-primary', onclick: () => acceptPending(p.id, [p.combined]) }, `Add ${formatINR(p.combined)} as one`));
+    }
     if (p.kind === 'multiple' && p.amounts.length > 1) {
-      actions.push(el('button', { type: 'button', class: 'btn btn-primary', onclick: () => acceptPending(p.id, p.amounts) }, `Add all ${p.amounts.length}`));
+      actions.push(el('button', { type: 'button', class: p.combined ? 'btn btn-outline' : 'btn btn-primary', onclick: () => acceptPending(p.id, p.amounts) }, `Add all ${p.amounts.length} separately`));
     }
     for (const a of p.amounts) {
       actions.push(el('button', { type: 'button', class: p.kind === 'multiple' ? 'btn btn-outline' : 'btn btn-primary', onclick: () => acceptPending(p.id, [a]) },
@@ -594,6 +657,8 @@ $('btn-undo').addEventListener('click', doUndo);
 $('btn-new-book').addEventListener('click', () => openBookDialog('new'));
 $('btn-book-edit').addEventListener('click', () => openBookDialog('edit'));
 $('book-select').addEventListener('change', (ev) => {
+  selecting = false;
+  selected.clear();
   L.switchBook(state, ev.target.value);
   commit();
   toast(`Now entering into ${title(activeBook())}.`);
@@ -640,7 +705,17 @@ $('manual-form').addEventListener('submit', (ev) => {
 });
 
 $('lang-select').addEventListener('change', (ev) => setLang(ev.target.value));
-$('mode-select').addEventListener('change', (ev) => { state.settings.mode = ev.target.value; speech.setMode(state.settings.mode); persist(); });
+function setMode(mode) {
+  state.settings.mode = mode;
+  speech.setMode(mode);
+  persist();
+  renderSettings();
+}
+$('mode-select').addEventListener('change', (ev) => setMode(ev.target.value));
+$('btn-quiet').addEventListener('click', () => {
+  setMode(state.settings.mode === 'continuous' ? 'phrase' : 'continuous');
+  toast(state.settings.mode === 'continuous' ? 'Quiet mode: one long listening session, far fewer beeps.' : 'Phrase mode: a beep before every amount.');
+});
 $('theme-select').addEventListener('change', (ev) => { state.settings.theme = ev.target.value; applyTheme(); persist(); });
 $('readback-select').addEventListener('change', (ev) => { state.settings.readBack = ev.target.value; if (ev.target.value === 'off') readBack.cancel(); persist(); renderSettings(); });
 $('fast-multi').addEventListener('change', (ev) => { state.settings.fastMulti = ev.target.checked; persist(); });

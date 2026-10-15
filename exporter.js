@@ -146,6 +146,7 @@ export function validateState(input) {
         transcript: str(p.transcript, 300, 'Transcript'),
         amounts: Array.isArray(p.amounts) ? p.amounts.filter((a) => Number.isSafeInteger(a) && a > 0 && a <= MAX_ENTRY_PAISE).slice(0, 20) : [],
         reference: str(p.reference, 40, 'Reference'),
+        combined: Number.isSafeInteger(p.combined) && p.combined > 0 && p.combined <= MAX_ENTRY_PAISE ? p.combined : null,
         leaf: Number.isSafeInteger(p.leaf) && p.leaf >= 1 && p.leaf <= MAX_LEAF ? p.leaf : null,
         reasons: Array.isArray(p.reasons) ? p.reasons.filter((r) => typeof r === 'string').map((r) => r.slice(0, 200)).slice(0, 5) : [],
         createdAt: iso(p.createdAt, 'Pending time'),
@@ -160,12 +161,15 @@ export function validateState(input) {
     pending,
     settings: {
       lang: ['en-IN', 'ml-IN', 'en-US'].includes(s.lang) ? s.lang : d.lang,
-      mode: ['phrase', 'continuous'].includes(s.mode) ? s.mode : d.mode,
+      // Before settingsRev 3 the default was phrase-by-phrase (a beep before every amount);
+      // move those users to the quieter continuous mode once.
+      mode: (s.settingsRev || 0) < 3 ? 'continuous' : (['phrase', 'continuous'].includes(s.mode) ? s.mode : d.mode),
       theme: ['system', 'light', 'dark'].includes(s.theme) ? s.theme : d.theme,
       readBack: ['off', 'amount', 'total', 'both'].includes(s.readBack) ? s.readBack : d.readBack,
       confirmMalayalam: typeof s.confirmMalayalam === 'boolean' ? s.confirmMalayalam : d.confirmMalayalam,
       fastMulti: typeof s.fastMulti === 'boolean' ? s.fastMulti : d.fastMulti,
       view: ['tape', 'details'].includes(s.view) ? s.view : d.view,
+      settingsRev: 3,
     },
   };
 }

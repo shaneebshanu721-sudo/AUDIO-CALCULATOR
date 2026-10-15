@@ -303,3 +303,18 @@ details > summary { cursor: pointer; font-weight: 800; min-height: 32px; display
   transition: transform .2s ease; z-index: 50; font-weight: 700; box-shadow: 0 6px 20px rgba(0,0,0,.25);
 }
 .toast.show { transform: translateX(-50%) translateY(0); }
+
+/* Selection & bulk delete */
+.tape-tools { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.chip-danger { color: var(--error-ink); }
+.select-bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; padding: 8px 10px;
+  border-radius: 12px; background: var(--accent-soft); color: var(--ok-ink);
+}
+.select-bar[hidden] { display: none; }
+.select-count { font-weight: 800; flex: 1 1 auto; }
+.tape li.row .leaf::before, .tape li.drow .dleaf::before { content: none; }
+.tape.selecting li.row .leaf::before, .tape.selecting li.drow .dleaf::before { content: '☐ '; }
+.tape.selecting li.selected .leaf::before, .tape.selecting li.selected .dleaf::before { content: '☑ '; color: var(--accent); }
+.tape.selecting li.selected { background: var(--accent-soft); }
+.tape.selecting .acts { display: none; }

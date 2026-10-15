@@ -53,7 +53,7 @@ export function createInitialState() {
 }
 
 export function defaultSettings() {
-  return { lang: 'en-IN', mode: 'phrase', theme: 'system', readBack: 'both', confirmMalayalam: false, fastMulti: true, view: 'tape' };
+  return { lang: 'en-IN', mode: 'continuous', theme: 'system', readBack: 'both', confirmMalayalam: false, fastMulti: true, view: 'tape', settingsRev: 3 };
 }
 
 /** "Receipt Book No. 1", "Voucher Book No. 12", or just the name for "Other". */
@@ -193,6 +193,15 @@ export function deleteEntry(state, bookId, entryId) {
   return book.entries.splice(idx, 1)[0];
 }
 
+/** Delete several entries of one book at once. Returns how many were removed. */
+export function deleteEntries(state, bookId, entryIds) {
+  const book = getBook(state, bookId);
+  const ids = new Set(entryIds);
+  const before = book.entries.length;
+  book.entries = book.entries.filter((e) => !ids.has(e.id));
+  return before - book.entries.length;
+}
+
 /** Remove the most recently added entry of a book. Returns it, or null if empty. */
 export function undoLast(state, bookId) {
   const book = getBook(state, bookId);
@@ -237,6 +246,7 @@ export function addPending(state, item) {
     kind: item.kind === 'multiple' ? 'multiple' : 'confirm',
     transcript: cleanText(item.transcript, 300),
     amounts: (item.amounts || []).filter((a) => Number.isSafeInteger(a) && a > 0 && a <= MAX_ENTRY_PAISE),
+    combined: Number.isSafeInteger(item.combined) && item.combined > 0 && item.combined <= MAX_ENTRY_PAISE ? item.combined : null,
     reference: cleanText(item.reference || '', 40),
     leaf: (() => { try { return parseLeaf(item.leaf); } catch { return null; } })(),
     reasons: (item.reasons || []).map((r) => cleanText(r, 200)).slice(0, 5),

@@ -74,6 +74,7 @@
             <button type="button" class="seg-btn" data-lang="ml-IN">മലയാളം</button>
           </div>
           <button type="button" id="btn-readback" class="chip" aria-pressed="true">🔊 Read total</button>
+          <button type="button" id="btn-quiet" class="chip" aria-pressed="true">🔕 Quiet mode</button>
           <button type="button" id="btn-retry" class="chip chip-strong" hidden>Retry</button>
         </div>
         <div class="live">
@@ -99,13 +100,23 @@
             <button type="button" class="seg-btn" data-view="details">Details</button>
           </div>
         </div>
+        <div class="tape-tools" id="tape-tools">
+          <button type="button" id="btn-select" class="chip">☑ Select</button>
+          <button type="button" id="btn-clear-book" class="chip chip-danger">🗑 Clear book</button>
+        </div>
+        <div id="select-bar" class="select-bar" hidden>
+          <span id="select-count" class="select-count">0 selected</span>
+          <button type="button" id="btn-select-all" class="btn btn-outline btn-sm">Select all</button>
+          <button type="button" id="btn-delete-selected" class="btn btn-danger btn-sm" disabled>Delete</button>
+          <button type="button" id="btn-select-cancel" class="btn btn-ghost btn-sm">Done</button>
+        </div>
         <div class="tape-head" aria-hidden="true"><span>Leaf</span><span>Amount</span><span>Total</span></div>
         <div id="tape-scroll" class="tape-scroll">
           <ol id="entry-list" class="tape"></ol>
           <p id="empty-hint" class="muted empty-hint">No leaves yet. Tap <strong>Start</strong> and say the first amount — or type it below.</p>
         </div>
         <div class="tape-total"><span>Total</span><strong id="history-total"></strong></div>
-        <p class="muted small tape-hint">Tap any line to edit or delete it.</p>
+        <p class="muted small tape-hint" id="tape-hint">Tap any line to edit or delete it. Use ☑ Select to delete several lines.</p>
       </section>
 
       <!-- Manual -->
@@ -173,8 +184,8 @@
         <label class="check"><input type="checkbox" id="confirm-ml"> Ask before adding amounts heard as Malayalam words</label>
         <label class="field">Recognition mode
           <select id="mode-select">
-            <option value="phrase">Phrase by phrase, auto-restart (Android)</option>
-            <option value="continuous">Continuous session (desktop Chrome)</option>
+            <option value="continuous">Quiet — one long session, fewer beeps (recommended)</option>
+            <option value="phrase">Phrase by phrase — a beep before every amount</option>
           </select>
         </label>
         <label class="field">Theme
@@ -200,7 +211,9 @@
         <summary>Voice tips</summary>
         <ul class="tips">
           <li>Say an amount, pause briefly, say the next. No need to say “plus”.</li>
-          <li>Fast mode: “588 … 1400 … 600” — speak at your pace; each amount is added.</li>
+          <li>Fast mode: “588 … 1400 … 600” — leave a short pause between amounts.</li>
+          <li>Most reliable for fast work: say digits — “four two zero zero” or “four two double zero” = ₹4,200.</li>
+          <li>If an amount looks wrong, open <strong>Details</strong> on the tape to see exactly what the phone heard.</li>
           <li>Set a leaf: “leaf 25” — the next amount goes to leaf 25, then 26, 27…</li>
           <li>Leaf and amount together: “leaf 7, five hundred eighty eight”.</li>
           <li>Say “undo” to reverse the last action.</li>

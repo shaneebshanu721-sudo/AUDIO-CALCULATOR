@@ -141,7 +141,7 @@ export class SpeechController {
       this._emit(STATES.ERROR, 'start-failed', true);
       return;
     }
-    const session = { id: ++this.sessionId, processed: new Set(), gotFinal: false, fatal: null, aborted: false, openedAt: this.now() };
+    const session = { id: ++this.sessionId, processed: new Set(), finalTexts: [], gotFinal: false, fatal: null, aborted: false, openedAt: this.now() };
     this.rec = rec;
     this.session = session;
     rec.lang = this.lang;
@@ -184,8 +184,28 @@ export class SpeechController {
       session.processed.add(i);
       const alternatives = [];
       for (let a = 0; a < res.length; a++) alternatives.push({ transcript: String(res[a].transcript || ''), confidence: Number(res[a].confidence) || 0 });
-      const transcript = alternatives[0].transcript.trim();
+      let transcript = alternatives[0].transcript.trim();
       if (!transcript) continue;
+      // Android Chrome in continuous mode sometimes repeats everything already finalised
+      // in this session at the start of a new result ("4200" then "4200 5300").
+      // Keep only the new part, so nothing is counted twice.
+      if (this.mode === 'continuous' && session.finalTexts.length) {
+        const n = normText(transcript);
+        const said = session.finalTexts;
+        let stripped = null;
+        for (let k = 0; k < said.length && stripped === null; k++) {
+          const prefix = said.slice(k).join(' ');
+          if (n === prefix) stripped = '';
+          else if (n.startsWith(prefix + ' ')) stripped = n.slice(prefix.length + 1);
+        }
+        if (stripped === '') { session.finalTexts.push(n); continue; } // pure repeat
+        if (stripped !== null) {
+          transcript = stripped;
+          alternatives[0] = { ...alternatives[0], transcript: stripped };
+          alternatives.length = 1; // other alternatives still contain the repeated part
+        }
+      }
+      session.finalTexts.push(normText(transcript));
       const t = this.now();
       const possibleDuplicate = !!(this.lastFinal && this.lastFinal.text === normText(transcript) && t - this.lastFinal.time < DUPLICATE_WINDOW_MS);
       this.lastFinal = { text: normText(transcript), time: t };

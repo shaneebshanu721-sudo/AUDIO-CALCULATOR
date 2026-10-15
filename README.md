@@ -2,6 +2,7 @@
 
 A mobile-first web app for internal auditors who total physical receipt books, vouchers and cash receipts. Tap **Start Listening** once, speak each voucher amount with a short pause between them, and the app adds every amount to the current receipt book — no typing, no saying “plus”.
 
+- **Version 3:** Quiet mode (one long listening session, far fewer Android beeps) · digit dictation (“four two zero zero”, “four two double zero”) · “4000 200” is offered as ₹4,200 instead of being split silently · ☑ Select to delete several lines · 🗑 Clear book · better Malayalam thousands (നാലായിരത്തി ഇരുനൂറ്)
 - **Version 2:** navy & white design · adding-machine **tape** with leaf numbers and running total · automatic leaf numbering (1, 2, 3… from a starting leaf you choose; say “leaf 25” to jump) · big **Undo** that reverses any add/edit/delete · **read-back** of each amount and the total · fast dictation (“588 … 1400 … 600”) · better mixed Malayalam/English recognition
 - Separate workspace per Receipt / Voucher / Cash book (number, audit date, first leaf), plus a consolidated grand total
 - Every entry keeps its leaf number, amount, optional voucher reference, time, source (voice/manual), the exact speech transcript and remarks
@@ -105,7 +106,7 @@ Short version (details in [docs/SPEECH-RECOGNITION.md](docs/SPEECH-RECOGNITION.m
 | Page opened as `content://` / `file://` / `http://` (not localhost) | Microphone blocked by Chrome. Use the https address. |
 | In-app browsers (WhatsApp, Gmail), Firefox, some Samsung Internet versions | Speech API usually missing → manual entry only. |
 | Offline | Voice input stops with “internet connection required”; manual entry works; data is safe. |
-| “Truly continuous” listening on Android | Not offered by Android Chrome. The app restarts listening automatically after each phrase/silence; you may hear Android’s short start chime each time. |
+| The “ting” sound on Android | Played by Android each time listening (re)starts; a web page cannot switch it off. **Quiet mode** (default) keeps one session open across many amounts, so it plays only now and then (after long silences). |
 | Manglish (Malayalam + English) | Use the **മലയാളം** button first: Chrome then writes Malayalam numbers in Malayalam script and English numbers as Malayalam-script transliterations (ടെൻ തൗസൻഡ്), both understood. If amounts come out wrong, tap **English**. A setting can make Malayalam-word amounts ask before adding. |
 
 ---
@@ -138,7 +139,7 @@ Requires Node.js 18+ (no packages to install):
 npm test
 ```
 
-65 tests cover the amount parser (English words, digits, Indian grouping, lakh/crore, decimals/paise, voucher references, Manglish and Malayalam script, never merging two amounts), money formatting and integer-paise sums, receipt-book logic (the ₹52,200 sample, edit to ₹20,250, delete ₹600, independent second book, undo/clear), CSV export (escaping, formula-injection protection, totals), JSON backup validation, storage recovery, and the speech state machine (auto-restart, duplicate events, interim results, permission denied, network failure, restart-loop protection, idle stop), plus an end-to-end smoke test that boots the real UI code against a minimal DOM stand-in and runs the whole auditor workflow. See [docs/TEST-REPORT.md](docs/TEST-REPORT.md) for results and the on-device checklist.
+73 tests cover the amount parser (English words, digits, Indian grouping, lakh/crore, decimals/paise, voucher references, Manglish and Malayalam script, never merging two amounts), money formatting and integer-paise sums, receipt-book logic (the ₹52,200 sample, edit to ₹20,250, delete ₹600, independent second book, undo/clear), CSV export (escaping, formula-injection protection, totals), JSON backup validation, storage recovery, and the speech state machine (auto-restart, duplicate events, interim results, permission denied, network failure, restart-loop protection, idle stop), plus an end-to-end smoke test that boots the real UI code against a minimal DOM stand-in and runs the whole auditor workflow. See [docs/TEST-REPORT.md](docs/TEST-REPORT.md) for results and the on-device checklist.
 
 To try it on a computer: `npm run serve` (or `python3 -m http.server 8080`) and open <http://localhost:8080> in Chrome — `localhost` counts as secure, so the mic works there. Opening `http://192.168.x.x:8080` from your phone will **not** allow the mic (not https).
 
