@@ -53,7 +53,7 @@ export function createInitialState() {
 }
 
 export function defaultSettings() {
-  return { lang: 'en-IN', mode: 'continuous', theme: 'system', readBack: 'both', confirmMalayalam: false, fastMulti: true, view: 'tape', settingsRev: 3, maxAmount: 1_00_000 * 100 };
+  return { lang: 'en-IN', mode: 'continuous', theme: 'system', readBack: 'both', confirmMalayalam: false, fastMulti: true, view: 'tape', settingsRev: 3, maxAmount: 1_00_000 * 100, autoFix: true };
 }
 
 /** "Receipt Book No. 1", "Voucher Book No. 12", or just the name for "Other". */

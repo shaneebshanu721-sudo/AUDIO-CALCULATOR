@@ -171,6 +171,7 @@ export function validateState(input) {
       fastMulti: typeof s.fastMulti === 'boolean' ? s.fastMulti : d.fastMulti,
       view: ['tape', 'details'].includes(s.view) ? s.view : d.view,
       settingsRev: 3,
+      autoFix: typeof s.autoFix === 'boolean' ? s.autoFix : d.autoFix,
       maxAmount: Number.isSafeInteger(s.maxAmount) && s.maxAmount >= 0 && s.maxAmount <= MAX_ENTRY_PAISE ? s.maxAmount : d.maxAmount,
     },
   };

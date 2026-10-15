@@ -2,7 +2,7 @@
 // textContent (never innerHTML) so transcripts/remarks/imports cannot inject markup.
 
 import { formatINR, parseMoneyInput, paiseToInput } from './money.js';
-import { parseAmount, splitSuggestions } from './parser.js';
+import { parseAmount, splitSuggestions, unglue } from './parser.js';
 import * as L from './ledger.js';
 import { booksToCSV, allBooksCSV, makeBackup, parseBackup, fileSafe, MAX_BACKUP_BYTES } from './exporter.js';
 import { loadState, saveState, wipeAll, requestPersistentStorage } from './storage.js';
@@ -10,7 +10,7 @@ import { SpeechController, getRecognitionCtor, STATES, MESSAGES } from './speech
 import { ReadBack, readBackText } from './readback.js';
 import { UndoHistory } from './history.js';
 
-export const APP_VERSION = '3.1.0';
+export const APP_VERSION = '3.2.0';
 const LOW_CONFIDENCE = 0.5;
 
 const $ = (id) => document.getElementById(id);
@@ -171,10 +171,10 @@ function speakAdded(addedPaise, totalPaise) {
   readBack.speak(readBackText(mode, addedPaise, totalPaise), nums);
 }
 
-function addVoiceEntries(book, amounts, transcript, reference) {
+function addVoiceEntries(book, amounts, transcript, reference, remarks = '') {
   const { leaf, ref } = leafAndRef(reference);
   const added = mutate(amounts.length > 1 ? `${amounts.length} amounts` : formatINR(amounts[0]), () =>
-    amounts.map((paise, i) => L.addEntry(state, book.id, { paise, source: 'voice', transcript, reference: i === 0 ? ref : '', leaf: i === 0 ? leaf : undefined })));
+    amounts.map((paise, i) => L.addEntry(state, book.id, { paise, source: 'voice', transcript, remarks, reference: i === 0 ? ref : '', leaf: i === 0 ? leaf : undefined })));
   justAddedIds = new Set(added.map((e) => e.id));
   render();
   const total = L.bookTotal(book);
@@ -246,8 +246,26 @@ function handleFinal(r) {
   if (parsed.usedMalayalam && state.settings.confirmMalayalam) reasons.push('Malayalam number words (confirmation is on in settings).');
   if (r.possibleDuplicate) reasons.push('Same phrase heard twice quickly — possible duplicate.');
 
-  // Large-amount guard: fast speech can run two amounts into one big number.
+  // Auto-correct how Google writes one amount in pieces:
+  //   "2000 100" -> 2,100      "2000100" -> 2,100 (only when above the check limit)
   const limit = state.settings.maxAmount;
+  let fixNote = '';
+  const autoFix = (next, from) => {
+    fixNote = `auto-corrected from “${from}”`;
+    amounts = [next];
+    parsed = { ...parsed, status: 'ok', paise: next };
+    const splitNote = /more than one amount|as one amount|said in parts/i;
+    for (let k = reasons.length - 1; k >= 0; k--) if (splitNote.test(reasons[k])) reasons.splice(k, 1);
+  };
+  if (state.settings.autoFix) {
+    if (parsed.status === 'multiple' && parsed.combined && amounts.length === 2) autoFix(parsed.combined, r.transcript);
+    else if (limit && amounts.length === 1 && amounts[0] > limit) {
+      const g = unglue(amounts[0]);
+      if (g && g <= limit) autoFix(g, r.transcript);
+    }
+  }
+
+  // Large-amount guard: fast speech can run two amounts into one big number.
   let splits = [];
   const big = amounts.filter((a) => a > limit);
   if (limit && big.length) {
@@ -265,7 +283,8 @@ function handleFinal(r) {
 
   const fastOk = parsed.status === 'multiple' && parsed.cleanSplit && state.settings.fastMulti;
   if ((parsed.status === 'ok' || fastOk) && reasons.length === (fastOk ? 1 : 0)) {
-    addVoiceEntries(book, amounts, parsed.transcript || r.transcript, parsed.reference);
+    addVoiceEntries(book, amounts, parsed.transcript || r.transcript, parsed.reference, fixNote);
+    if (fixNote) showFlash('ok', `+ ${formatINR(amounts[0])}`, `Heard “${r.transcript}” → corrected to ${formatINR(amounts[0])} · tap the line to change`);
     return;
   }
   mutate('uncertain result', () => L.addPending(state, { bookId: book.id, kind, transcript: r.transcript, amounts, splits, combined: parsed.combined || null, reference: leafAndRef(parsed.reference).ref, leaf: leafAndRef(parsed.reference).leaf, reasons }));
@@ -364,6 +383,7 @@ function renderSettings() {
   $('theme-select').value = s.theme;
   $('readback-select').value = s.readBack;
   $('fast-multi').checked = !!s.fastMulti;
+  $('auto-fix').checked = !!s.autoFix;
   if (document.activeElement !== $('max-amount')) $('max-amount').value = s.maxAmount ? paiseToInput(s.maxAmount) : '';
   $('confirm-ml').checked = !!s.confirmMalayalam;
   for (const b of document.querySelectorAll('[data-lang]')) b.setAttribute('aria-pressed', String(b.dataset.lang === s.lang));
@@ -436,11 +456,21 @@ function parseDictation(text) {
     const p = parseAmount(line);
     if (p.status === 'command') continue;
     if (p.status === 'invalid') { ok = false; notes.push(`Not understood: “${line}” — ${p.reasons[0] || 'please correct it'}`); continue; }
-    const list = p.status === 'multiple' ? p.amounts : [p.paise];
+    let list = p.status === 'multiple' ? p.amounts : [p.paise];
+    if (state.settings.autoFix && p.combined && list.length === 2) {
+      list = [p.combined];
+      items.push({ paise: p.combined, warn: false, fixed: line });
+      continue;
+    }
+    if (state.settings.autoFix && limit && list.length === 1 && list[0] > limit) {
+      const g = unglue(list[0]);
+      if (g && g <= limit) { items.push({ paise: g, warn: false, fixed: line }); continue; }
+    }
     if (p.combined) notes.push(`“${line}” may be ${formatINR(p.combined)} as one amount — if so, remove the space.`);
     if (p.status === 'confirm') notes.push(p.reasons.join(' '));
     for (const a of list) items.push({ paise: a, warn: limit && a > limit });
   }
+  if (items.some((i) => i.fixed)) notes.push('★ = joined into one amount (e.g. “2000 100” → ₹2,100). If you meant separate amounts, put each on a new line.');
   if (items.some((i) => i.warn)) notes.push(`Amber amounts are above your check limit of ${formatINR(limit)} — two amounts may have joined. Fix the text if needed.`);
   return { items, notes, ok: ok && items.length > 0 };
 }
@@ -450,7 +480,7 @@ function renderDictation() {
   const { items, notes, ok } = parseDictation($('dictate-input').value);
   let leaf = L.nextLeafFor(book);
   $('dictate-preview').replaceChildren(...items.map((it) => el('li', { class: it.warn ? 'warn' : '' },
-    el('span', { class: 'lf', text: `L${leaf++}` }), formatINR(it.paise))));
+    el('span', { class: 'lf', text: `L${leaf++}` }), formatINR(it.paise) + (it.fixed ? ' ★' : ''))));
   $('dictate-note').textContent = notes.join(' ');
   const sum = items.reduce((s, it) => s + it.paise, 0);
   const add = $('dictate-add');
@@ -471,7 +501,7 @@ $('dictate-add').addEventListener('click', () => {
   if (over.length && !window.confirm(`${over.map((i) => formatINR(i.paise)).join(', ')} ${over.length === 1 ? 'is' : 'are'} above your check limit. Add anyway?`)) return;
   const book = activeBook();
   const added = mutate(`${items.length} typed-by-voice amounts`, () =>
-    items.map((it) => L.addEntry(state, book.id, { paise: it.paise, source: 'voice', transcript: text.slice(0, 300) })));
+    items.map((it) => L.addEntry(state, book.id, { paise: it.paise, source: 'voice', transcript: (it.fixed || text).slice(0, 300), remarks: it.fixed ? `auto-corrected from “${it.fixed}”` : '' })));
   justAddedIds = new Set(added.map((e) => e.id));
   $('dictate-input').value = '';
   renderDictation();
@@ -806,6 +836,7 @@ $('max-amount').addEventListener('change', (ev) => {
   persist();
   toast(`Amounts above ${formatINR(p.paise)} will be held for checking.`);
 });
+$('auto-fix').addEventListener('change', (ev) => { state.settings.autoFix = ev.target.checked; persist(); renderDictation(); });
 $('fast-multi').addEventListener('change', (ev) => { state.settings.fastMulti = ev.target.checked; persist(); });
 $('confirm-ml').addEventListener('change', (ev) => { state.settings.confirmMalayalam = ev.target.checked; persist(); });
 

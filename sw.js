@@ -1,7 +1,7 @@
 // sw.js — offline support. NETWORK-FIRST: when online you always get the latest
 // deployed files (so updates appear on the next reload); the cache is only a
 // fallback when there is no connection. No financial data is ever cached here.
-const CACHE = 'vac-shell-v4';
+const CACHE = 'vac-shell-v5';
 const SHELL = [
   './', './index.html', './styles.css', './manifest.webmanifest', './icon.svg', './icon-192.png',
   './app.js', './money.js', './parser.js', './ledger.js', './exporter.js', './storage.js', './speech.js', './readback.js', './history.js',

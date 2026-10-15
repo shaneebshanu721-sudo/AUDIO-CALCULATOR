@@ -560,3 +560,23 @@ export function splitSuggestions(paise, limitPaise, max = 3) {
   }
   return out.filter((x) => x.score > 0).sort((x, y) => y.score - x.score).slice(0, max).map((x) => x.pair);
 }
+
+/**
+ * Google's recogniser sometimes glues the parts of one amount together:
+ * "two thousand one hundred" -> "2000100", "twenty thousand two hundred" -> "20000200".
+ * If the digits split into a round number followed by a smaller part that fits in its
+ * zeros (2000|100), return the intended amount (2,100). Only one possible reading is
+ * accepted; otherwise null.
+ */
+export function unglue(paise) {
+  if (!Number.isSafeInteger(paise) || paise % 100 !== 0) return null;
+  const s = String(paise / 100);
+  const found = [];
+  for (let i = 1; i < s.length; i++) {
+    const a = s.slice(0, i), b = s.slice(i);
+    if (b[0] === '0') continue;
+    const zeros = a.length - a.replace(/0+$/, '').length;
+    if (zeros >= b.length && zeros >= 2) found.push((Number(a) + Number(b)) * 100);
+  }
+  return found.length === 1 ? found[0] : null;
+}
